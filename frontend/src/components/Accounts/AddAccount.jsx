@@ -124,10 +124,15 @@ const Toaster = ({ message, type, onClose }) => {
 
 const MAX_ACCOUNTS_PER_CNIC = 2;
 const MAX_PRODUCT_PRICE = 100000;
-const OLD_RECORD_CASE_NO_LIMIT = 10000;
+
+// ✅ Branch-wise old record limits
+const OLD_RECORD_CASE_NO_LIMIT_BY_BRANCH = {
+  1: 8987,   // Branch 1
+  2: 2485,   // Branch 2
+};
 
 // ============================================
-// ✅ NEW: Max limits for repeatable fields
+// ✅ Max limits for repeatable fields
 // ============================================
 const MAX_PHONE_NUMBERS = 4;
 const MAX_VOICE_FILES = 10;
@@ -163,6 +168,13 @@ const AddAccount = () => {
   const [showFirstInstallmentModal, setShowFirstInstallmentModal] = useState(false);
   const [firstInstallmentPayAmount, setFirstInstallmentPayAmount] = useState('');
   const [firstInstallmentSlipNo, setFirstInstallmentSlipNo] = useState('');
+
+  // ============================================
+  // ✅ Helper: Get branch-wise old record limit
+  // ============================================
+  const getOldRecordCaseLimit = (branch) => {
+    return OLD_RECORD_CASE_NO_LIMIT_BY_BRANCH[branch] || OLD_RECORD_CASE_NO_LIMIT_BY_BRANCH[1];
+  };
 
   // ============================================
   // ✅ TOASTER STATE
@@ -236,6 +248,9 @@ const AddAccount = () => {
   
   const containerRef = useRef(null);
 
+  // ✅ Current branch ka limit
+  const caseNoLimit = getOldRecordCaseLimit(formData.branch || userBranch || 1);
+
   // ============================================
   // ✅ SCROLL TO TOP FUNCTION
   // ============================================
@@ -281,7 +296,7 @@ const AddAccount = () => {
     setEmployeesLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/users?role=employee`, {
+     const response = await fetch(`${API_URL}/users?role=employee&paginate=false`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/json'
@@ -864,6 +879,8 @@ const AddAccount = () => {
   };
 
   const validateStep1 = () => {
+    // ✅ Branch-wise limit use karo
+    const branchLimit = getOldRecordCaseLimit(formData.branch || userBranch || 1);
     const newErrors = {};
     if (!formData.name) newErrors.name = 'Name is required';
     if (!formData.cnic) newErrors.cnic = 'CNIC is required';
@@ -899,8 +916,8 @@ const AddAccount = () => {
           const numericCaseNo = parseInt(trimmedCaseNo, 10);
           if (numericCaseNo <= 0) {
             newErrors.caseNo = 'Case number must be valid (greater than 0).';
-          } else if (numericCaseNo >= OLD_RECORD_CASE_NO_LIMIT) {
-            newErrors.caseNo = `Old Record: Case number must be less than ${OLD_RECORD_CASE_NO_LIMIT} (only for old records). New records are auto-generated above ${OLD_RECORD_CASE_NO_LIMIT}.`;
+          } else if (numericCaseNo >= branchLimit) {  // ✅ Branch-wise limit
+            newErrors.caseNo = `Old Record: Case number must be less than ${branchLimit} (only for old records). New records are auto-generated above ${branchLimit}.`;
           }
         }
       }
@@ -1570,7 +1587,7 @@ const AddAccount = () => {
             <div style={{ fontWeight: 700, fontSize: '14px' }}>Old Record (Purana Record)</div>
             <div style={{ fontWeight: 500, fontSize: '12px', color: '#6b7280' }}>
               {isOldRecord
-                ? `ON — No restrictions (price, CNIC limit, duplicate account) apply. Case number must be entered manually (under ${OLD_RECORD_CASE_NO_LIMIT}).`
+                ? `ON — No restrictions (price, CNIC limit, duplicate account) apply. Case number must be entered manually (under ${caseNoLimit}).`
                 : 'Turn ON to add old database records — no restrictions will apply, but you must enter a case number manually and provide at least 1 guarantor CNIC.'}
             </div>
           </div>
@@ -1618,14 +1635,14 @@ const AddAccount = () => {
             <input
               type="text"
               className="form-input"
-              placeholder={`e.g. 9001 (must be under ${OLD_RECORD_CASE_NO_LIMIT})`}
+              placeholder={`e.g. ${caseNoLimit - 1} (must be under ${caseNoLimit})`}
               value={manualCaseNo}
               onChange={(e) => setManualCaseNo(e.target.value)}
               style={{ fontWeight: 500 }}
             />
           </div>
           <small className="field-hint" style={{ fontWeight: 500 }}>
-            ⚠️ Only old case numbers (below {OLD_RECORD_CASE_NO_LIMIT}) are allowed. New case numbers are auto-generated from {OLD_RECORD_CASE_NO_LIMIT} onwards — no manual entry needed for those.
+            ⚠️ Only old case numbers (below {caseNoLimit}) are allowed. New case numbers are auto-generated from {caseNoLimit} onwards — no manual entry needed for those.
           </small>
           {errors.caseNo && <span className="error-text" style={{ fontWeight: 600 }}>{errors.caseNo}</span>}
         </div>

@@ -684,26 +684,49 @@ class CustomerController extends Controller
                 $remainingAmount = $invoicePrice - $advancePayment;
                 $monthlyInstallment = $numberOfInstallments > 0 ? round($remainingAmount / $numberOfInstallments, 0) : 0;
 
+                // ============================================
+                // ✅ CASE NUMBER GENERATION - Branch Based
+                // ============================================
                 if ($isOldRecord && $manualCaseNo !== '') {
                     $caseNo = $manualCaseNo;
                     Log::info('✅ Using manual case_no (Old Record mode):', ['case_no' => $caseNo]);
                 } else {
-                    $lastCaseNo = Account::whereRaw("case_no REGEXP '^[0-9]+$'")
+                    // ✅ NEW RECORD: Branch-based auto-generation
+                    $branchId = $request->branch_id;
+                    
+                    // Branch-based starting number
+                    if ($branchId == 1) {
+                        $startFrom = 8987;  // Branch 1 ke liye
+                    } elseif ($branchId == 2) {
+                        $startFrom = 2485;  // Branch 2 ke liye
+                    } else {
+                        $startFrom = self::CASE_NO_START; // default 10000
+                    }
+
+                    // Get last case number for this specific branch
+                    $lastCaseNo = Account::where('branch_id', $branchId)
+                        ->whereRaw("case_no REGEXP '^[0-9]+$'")
                         ->selectRaw('MAX(CAST(case_no AS UNSIGNED)) as max_no')
                         ->value('max_no');
 
-                    $nextNo = ($lastCaseNo && $lastCaseNo >= self::CASE_NO_START)
-                        ? ((int) $lastCaseNo + 1)
-                        : self::CASE_NO_START;
+                    // Calculate next number
+                    if ($lastCaseNo && (int)$lastCaseNo >= $startFrom) {
+                        $nextNo = (int)$lastCaseNo + 1;
+                    } else {
+                        $nextNo = $startFrom; // Start from branch-specific number
+                    }
 
                     $caseNo = (string) $nextNo;
-                    Log::info('✅ Auto-generated case_no:', ['case_no' => $caseNo]);
+                    
+                    Log::info('✅ Branch-based case_no generated:', [
+                        'branch_id' => $branchId,
+                        'start_from' => $startFrom,
+                        'last_case_no' => $lastCaseNo,
+                        'new_case_no' => $caseNo
+                    ]);
                 }
 
                 // ✅ Create Account with chalan images
-                // 🔧 FIX: 'invoice_price' aur 'advance_amount' columns yahan pehle
-                // MISSING thay, isliye database mein hamesha invoice_price = NULL
-                // aur advance_amount = 0 save ho raha tha. Ab dono add kar diye hain.
                 $account = Account::create([
                     'customer_id' => $customer->id,
                     'employee_account_id' => $employeeAccount->id,
@@ -713,8 +736,8 @@ class CustomerController extends Controller
                     'chalan_front' => $chalanFrontPath,
                     'chalan_back' => $chalanBackPath,
                     'total_amount' => $invoicePrice,
-                    'invoice_price' => $invoicePrice,      // ✅ FIX: ab yeh column bhi set hoga
-                    'advance_amount' => $advancePayment,   // ✅ FIX: ab yeh column bhi set hoga
+                    'invoice_price' => $invoicePrice,
+                    'advance_amount' => $advancePayment,
                     'paid_amount' => $advancePayment,
                     'balance' => $invoicePrice - $advancePayment,
                     'monthly_installment' => $monthlyInstallment,
@@ -724,7 +747,7 @@ class CustomerController extends Controller
                     'next_due_date' => date('Y-m-d', strtotime('+1 month', strtotime($dueDate))),
                     'status' => 'active',
                     'created_by' => $loggedInUserId,
-                    'created_at' => $accountDate,   // ✅ FIX (was now())
+                    'created_at' => $accountDate,
                     'updated_at' => now(),
                 ]);
 
@@ -765,17 +788,17 @@ class CustomerController extends Controller
 
                 for ($i = 0; $i < $numberOfInstallments; $i++) {
                     $exactDueDate = new \DateTime($firstDueDate);
-                    $exactDueDate->modify("+{$i} months");   // ✅ exact din preserve, sirf month add
+                    $exactDueDate->modify("+{$i} months");
                     $month = $exactDueDate->format('Y-m');
 
                     $installments[] = [
                         'account_id' => $account->id,
                         'month' => $month,
-                        'due_date' => $exactDueDate->format('Y-m-d'), // ✅ FIX: exact date save
+                        'due_date' => $exactDueDate->format('Y-m-d'),
                         'due_amount' => $monthlyInstallment,
                         'paid_amount' => 0,
                         'balance' => $monthlyInstallment,
-                        'slip_no' => null, // ✅ ADDED
+                        'slip_no' => null,
                         'status' => 'unpaid',
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -809,7 +832,6 @@ class CustomerController extends Controller
                             $installmentStatus = 'unpaid';
                         }
 
-                        // ✅ Get slip_no from request
                         $slipNoValue = $request->input('slip_no') ?? $request->input('first_installment_slip_no');
 
                         $firstInstallment->update([
@@ -817,7 +839,7 @@ class CustomerController extends Controller
                             'balance' => $newBalance,
                             'status' => $installmentStatus,
                             'payment_date' => now(),
-                            'slip_no' => $slipNoValue, // ✅ ADDED
+                            'slip_no' => $slipNoValue,
                         ]);
 
                         Log::info('✅ First installment payment recorded with slip_no:', [
@@ -884,12 +906,7 @@ class CustomerController extends Controller
     }
 
     // ============================================
-    // ✅ UPDATED: Customer update — ab 4 phones (phone, phone_2-4)
-    // aur 10 voice consent files (voice_consent, voice_consent_2-10)
-    // sath tamam images bhi replace ho sakte hain.
-    //
-    // Frontend se yeh call POST + FormData ke sath karni hai
-    // (FormData mein '_method' => 'PUT' bhejna hai).
+    // ✅ UPDATED: Customer update
     // ============================================
     public function update(Request $request, $id)
     {
@@ -935,15 +952,11 @@ class CustomerController extends Controller
             ], 422);
         }
 
-        // ✅ Sirf allowed text/boolean fields fill karo (files alag se handle honge)
         $customer->fill($request->only([
             'name', 'cnic', 'phone', 'phone_2', 'phone_3', 'phone_4',
             'address', 'work', 'product_name', 'status', 'is_unlimited'
         ]));
 
-        // ============================================
-        // ✅ Helper: purani file delete karke nayi save karo
-        // ============================================
         $replaceFile = function ($fieldName, $folder, $prefix) use ($request, $customer) {
             if ($request->hasFile($fieldName)) {
                 if ($customer->{$fieldName} && file_exists(public_path('storage/' . $customer->{$fieldName}))) {

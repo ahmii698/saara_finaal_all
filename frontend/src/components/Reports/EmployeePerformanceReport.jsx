@@ -79,7 +79,7 @@ const EmployeePerformanceReport = () => {
   const fetchEmployees = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/users`, {
+     const response = await fetch(`${API_URL}/users?paginate=false`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/json'
